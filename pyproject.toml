@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "segment_classifier"
+version = "0.1.0"
+description = "Async segment classifier library"
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+beautifulsoup4 = "^4.12"
+lxml = "^5.0"
+pydantic = "^2.7"
+pydantic-settings = "^2.2"
+litellm = "^1.40"
+scikit-learn = "^1.5"
+numpy = "^1.26"
+aiofiles = "^23.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,23 @@
+{
+  "bbf0c0a954d9b2ae5cd2a7d935148c0185822a660f964e1ac8fa95c83d095c98": {
+    "fingerprint_hash": "bbf0c0a954d9b2ae5cd2a7d935148c0185822a660f964e1ac8fa95c83d095c98",
+    "component_type": "layout.header",
+    "confidence": 0.97,
+    "hit_count": 1,
+    "example_segment_id": "seg_002"
+  },
+  "85940433fe64be1f7db8c281e0245ff91bc0dd262c5b19127bb7c0408c7b5276": {
+    "fingerprint_hash": "85940433fe64be1f7db8c281e0245ff91bc0dd262c5b19127bb7c0408c7b5276",
+    "component_type": "layout.footer",
+    "confidence": 0.97,
+    "hit_count": 1,
+    "example_segment_id": "seg_003"
+  },
+  "f75d678b56d729a7f99effa99af968c0666f51ee7f610212043f575207cd8509": {
+    "fingerprint_hash": "f75d678b56d729a7f99effa99af968c0666f51ee7f610212043f575207cd8509",
+    "component_type": "collection.product_card",
+    "confidence": 0.95,
+    "hit_count": 2,
+    "example_segment_id": "seg_001"
+  }
+}
