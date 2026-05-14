@@ -1,8 +1,8 @@
 [tool.poetry]
 name = "segment_classifier"
-version = "0.1.0"
+version = "0.1.1"
 description = "Async segment classifier library"
-authors = ["Your Name <you@example.com>"]
+authors = ["Gagandeep Singh <gagan@innerkore.com>"]
 readme = "README.md"
 packages = [
     { include = "segment_classifier" }
