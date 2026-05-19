@@ -1,0 +1,18 @@
+model_list:
+  - model_name: high-complexity
+    litellm_params:
+      model: openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+      api_key: os.environ/LLM_API_KEY
+  - model_name: standard
+    litellm_params:
+      model: openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+      api_key: os.environ/LLM_API_KEY
+  - model_name: fast
+    litellm_params:
+      model: openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+      api_key: os.environ/LLM_API_KEY
+
+router_settings:
+  routing_strategy: "simple-shuffle"
+  num_retries: 3
+  timeout: 60

@@ -17,9 +17,9 @@ class ModelFeatureConfig(BaseModel):
     - text_density_ratio (very high or very low = complex)
     - sibling_count == 0 (one-off sections = complex)
     """
-    high_complexity_model: str = "anthropic/claude-opus-4"
-    standard_model: str = "anthropic/claude-sonnet-4-5"
-    fast_model: str = "anthropic/claude-haiku-4-5"
+    high_complexity_model: str = "high-complexity"
+    standard_model: str = "standard"
+    fast_model: str = "fast"
 
     high_complexity_dom_depth_threshold: int = 6
     high_complexity_unique_tag_threshold: int = 8
@@ -39,6 +39,7 @@ class ClassifierSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="CLASSIFIER_")
 
     # LiteLLM
+    litellm_config_path: str = "litellm_config.yaml"
     litellm_api_key: str = ""
     litellm_batch_size: int = 20         # max segments per LLM batch call
     litellm_max_concurrent_batches: int = 5

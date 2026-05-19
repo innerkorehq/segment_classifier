@@ -121,29 +121,92 @@ class ClassifierPipeline:
         # Stage 4: LLM Batch
         llm_calls_made = 0
         if pending:
-            llm_items = [
-                (seg, fingerprints[seg.segment_id][0], fingerprints[seg.segment_id][1])
-                for seg in pending
-            ]
+            # 1. Deduplicate by exact fingerprint
+            fp_to_segments: dict[str, list[InputSegment]] = {}
+            for seg in pending:
+                _, fp_hash = fingerprints[seg.segment_id]
+                fp_to_segments.setdefault(fp_hash, []).append(seg)
+
+            unique_fps = list(fp_to_segments.keys())
+
+            # 2. Group unique fingerprints into fuzzy clusters dynamically
+            dynamic_clusters: list[list[str]] = []
+            cluster_vectors: list[list[float]] = []
+
+            for fp_hash in unique_fps:
+                rep_seg = fp_to_segments[fp_hash][0]
+                normalized, _ = fingerprints[rep_seg.segment_id]
+                fp_string = self.fuzzy_stage._build_fingerprint_string(normalized)
+                vector = self.fuzzy_stage._vectorize(fp_string)
+
+                best_cluster_idx = -1
+                best_sim = -1.0
+                for i, c_vec in enumerate(cluster_vectors):
+                    # Vectors from TfidfTransformer are L2-normalized, so dot product is cosine similarity
+                    sim = sum(a * b for a, b in zip(vector, c_vec))
+                    if sim > best_sim:
+                        best_sim = sim
+                        best_cluster_idx = i
+
+                if best_sim >= self.settings.cache.l2_similarity_threshold:
+                    dynamic_clusters[best_cluster_idx].append(fp_hash)
+                else:
+                    dynamic_clusters.append([fp_hash])
+                    cluster_vectors.append(vector)
+
+            # 3. Prepare LLM items (one representative per dynamic cluster)
+            llm_items = []
+            for cluster_fps in dynamic_clusters:
+                rep_fp = cluster_fps[0]
+                rep_seg = fp_to_segments[rep_fp][0]
+                normalized = fingerprints[rep_seg.segment_id][0]
+                llm_items.append((rep_seg, normalized, rep_fp))
+
             llm_results = await self.llm_classifier.classify_batch(llm_items)
 
-            # For each LLM result, register in L1 + L2
-            for seg, result in zip(pending, llm_results):
-                normalized, fp_hash = fingerprints[seg.segment_id]
-                await self.l1_cache.set(fp_hash, FingerprintRecord(
-                    fingerprint_hash=fp_hash,
-                    component_type=result.component_type,
-                    confidence=result.confidence,
-                    example_segment_id=seg.segment_id
-                ))
-                await self.fuzzy_stage.register(
-                    fingerprint_hash=fp_hash,
-                    normalized=normalized,
-                    component_type=result.component_type,
-                    confidence=result.confidence
-                )
+            # 4. Apply results to all segments in the dynamic clusters
+            for cluster_fps, result in zip(dynamic_clusters, llm_results):
+                rep_fp = cluster_fps[0]
+                
+                for fp_hash in cluster_fps:
+                    group_rep_seg = fp_to_segments[fp_hash][0]
+                    normalized = fingerprints[group_rep_seg.segment_id][0]
+                    
+                    # Fuzzy match penalty if not the exact representative fingerprint
+                    confidence = result.confidence if fp_hash == rep_fp else max(0.0, result.confidence - 0.05)
+                    stage = result.classification_stage if fp_hash == rep_fp else ClassificationStage.L2_FUZZY_CACHE
 
-            classified.extend(llm_results)
+                    # Register in caches
+                    await self.l1_cache.set(fp_hash, FingerprintRecord(
+                        fingerprint_hash=fp_hash,
+                        component_type=result.component_type,
+                        confidence=confidence,
+                        example_segment_id=group_rep_seg.segment_id
+                    ))
+                    await self.fuzzy_stage.register(
+                        fingerprint_hash=fp_hash,
+                        normalized=normalized,
+                        component_type=result.component_type,
+                        confidence=confidence
+                    )
+
+                    # Create ClassifiedSegment for all input segments sharing this fp_hash
+                    for seg in fp_to_segments[fp_hash]:
+                        classified.append(ClassifiedSegment(
+                            segment_id=seg.segment_id,
+                            page_url=seg.page_url,
+                            page_slug=seg.page_slug,
+                            raw_html=seg.raw_html,
+                            text_content=seg.text_content,
+                            position_hint=seg.position_hint,
+                            component_type=result.component_type,
+                            classification_stage=stage,
+                            confidence=confidence,
+                            fingerprint_hash=fp_hash,
+                            cluster_id=result.cluster_id,
+                            llm_model_used=result.llm_model_used,
+                            llm_raw_response=result.llm_raw_response
+                        ))
 
             # Calculate total LLM batch calls
             grouped_by_model: dict[str, int] = {}

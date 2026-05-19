@@ -1,7 +1,11 @@
 import asyncio
 import json
 import logging
+import os
+import re
+import yaml
 import litellm
+from litellm import Router
 from typing import Any
 from segment_classifier.models import (
     InputSegment, ClassifiedSegment, LLMClassificationRequest,
@@ -24,6 +28,20 @@ class LLMBatchClassifier:
         # Set api key globally or per call, litellm supports both
         if settings.litellm_api_key:
             litellm.api_key = settings.litellm_api_key
+
+        # Initialize LiteLLM Router if config exists
+        self.router = None
+        if settings.litellm_config_path and os.path.exists(settings.litellm_config_path):
+            try:
+                with open(settings.litellm_config_path, "r") as f:
+                    config = yaml.safe_load(f)
+                self.router = Router(
+                    model_list=config.get("model_list", []),
+                    **config.get("router_settings", {})
+                )
+                logger.info(f"Initialized LiteLLM Router with config: {settings.litellm_config_path}")
+            except Exception as e:
+                logger.error(f"Failed to load LiteLLM config from {settings.litellm_config_path}: {e}")
 
     def select_model(
         self,
@@ -55,10 +73,10 @@ class LLMBatchClassifier:
         fingerprint_hash: str,
     ) -> LLMClassificationRequest:
         """Construct LLMClassificationRequest from segment + normalized data."""
-        return LLMClassificationRequest(
+        req = LLMClassificationRequest(
             segment_id=segment.segment_id,
             fingerprint_hash=fingerprint_hash,
-            normalized_html=normalized.skeleton,
+            normalized_html=normalized.normalized_html,
             position_hint=segment.position_hint,
             sibling_count=segment.sibling_count,
             url_hints=segment.url_path_segments,
@@ -66,6 +84,7 @@ class LLMBatchClassifier:
             child_tag_counts=normalized.child_tag_counts,
             text_density_ratio=normalized.text_density_ratio
         )
+        return req
 
     async def _call_litellm(
         self,
@@ -93,7 +112,7 @@ Available component types:
 ]
 
 Rules:
-- Use normalized_html structure only, ignore content values
+- Use the provided raw HTML in normalized_html to understand the component purpose and content
 - sibling_count >= 3 strongly suggests a collection item
 - position_hint=top/bottom suggests layout components
 - url_hints provide page context
@@ -108,29 +127,55 @@ Rules:
         ]
 
         try:
-            response = await litellm.acompletion(
-                model=model,
-                messages=messages,
-                timeout=self.settings.litellm_timeout_seconds,
-            )
+            if self.router:
+                response = await self.router.acompletion(
+                    model=model,
+                    messages=messages,
+                    timeout=self.settings.litellm_timeout_seconds,
+                )
+            else:
+                response = await litellm.acompletion(
+                    model=model,
+                    messages=messages,
+                    timeout=self.settings.litellm_timeout_seconds,
+                )
 
             # Record usage
             self._model_usage[model] = self._model_usage.get(model, 0) + 1
 
-            raw_response = response.choices[0].message.content
-            # Strip markdown
-            raw_response = raw_response.strip()
-            if raw_response.startswith("```json"):
-                raw_response = raw_response[7:]
-            elif raw_response.startswith("```"):
-                raw_response = raw_response[3:]
-            if raw_response.endswith("```"):
-                raw_response = raw_response[:-3]
+            raw_response = response.choices[0].message.content.strip()
+            
+            # Robust JSON extraction
+            json_str = raw_response
+            if "```" in json_str:
+                # Try to extract from markdown blocks
+                blocks = re.findall(r'```(?:json)?\s*(.*?)\s*```', json_str, re.DOTALL)
+                if blocks:
+                    json_str = blocks[0]
+            
+            # If still not parsing, try to find the first [ and last ]
+            try:
+                parsed = json.loads(json_str)
+            except json.JSONDecodeError:
+                start = json_str.find('[')
+                end = json_str.rfind(']')
+                if start != -1 and end != -1:
+                    try:
+                        parsed = json.loads(json_str[start:end+1])
+                    except:
+                        raise ValueError(f"Could not parse LLM response as JSON: {raw_response[:200]}...")
+                else:
+                    raise ValueError(f"No JSON array found in LLM response: {raw_response[:200]}...")
 
-            parsed = json.loads(raw_response.strip())
+            if not isinstance(parsed, list):
+                raise ValueError(f"LLM response is not a JSON array: {type(parsed)}")
 
             results = []
             for item in parsed:
+                if not isinstance(item, dict):
+                    logger.warning(f"Skipping non-dict item in LLM response: {item}")
+                    continue
+                
                 try:
                     results.append(LLMClassificationResult.model_validate(item))
                 except Exception as e:
@@ -139,7 +184,7 @@ Rules:
                         segment_id=item.get("segment_id", ""),
                         component_type=ComponentType.UNKNOWN,
                         confidence=0.0,
-                        reasoning=f"Parse error: {e}"
+                        reasoning=f"Validation error: {e}"
                     ))
 
             # Ensure all segments are accounted for

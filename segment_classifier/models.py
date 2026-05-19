@@ -112,10 +112,10 @@ class ClusterRecord(BaseModel):
 
 
 class LLMClassificationRequest(BaseModel):
-    """Batch item sent to LLM."""
+    """Batch item sent to LLM. Use the provided raw HTML in normalized_html to understand purpose and content."""
     segment_id: str
     fingerprint_hash: str
-    normalized_html: str          # skeleton only, no content
+    normalized_html: str          # raw HTML content of the segment
     position_hint: SegmentPosition
     sibling_count: int
     url_hints: list[str]
